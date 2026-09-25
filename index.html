@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Budget-Aware Step Selection</title>
+<meta name="description" content="Forward-only recovery of drifted analog accelerators: why single-step descent does not predict whole-run failure, a donor-calibrated step rule, and its accuracy–cost trade-off against target search and fixed transfer.">
+<meta property="og:title" content="Budget-Aware Step Selection for Forward-Only Recovery of Analog Accelerators">
+<meta property="og:description" content="A step that makes progress can still fail over the budget. Choosing it costs device queries too.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="static/css/fonts.css?v=a042ab64">
+<link rel="stylesheet" href="static/css/site.css?v=307d5da9">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="mark" href="#top">Budget-Aware Step Selection</a>
+    <nav aria-label="Sections">
+      <a href="#overview">At a glance</a>
+      <a href="#rule">Method</a>
+      <a href="#law">Predicting failure</a>
+      <a href="#fleet">Accuracy vs. cost</a>
+      <a href="#scope">Limitations</a>
+      <a href="#cite">Cite</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+<div class="wrap">
+
+<section class="hero" aria-labelledby="title">
+  <p class="eyebrow">ICLR 2027 submission · under double-blind review</p>
+  <h1 id="title">Budget-Aware Step Selection <span class="quiet">for <span class="nb">Forward-Only</span> Recovery of Analog Accelerators</span></h1>
+  <p class="byline">Anonymous authors</p>
+  <ul class="links">
+    <li><span>Paper · available after review</span></li>
+    <li><span title="Anonymized code accompanies the submission as supplementary material">Code · released with the paper</span></li>
+    <li><a href="#cite">BibTeX</a></li>
+  </ul>
+  <p class="lede">Recovering a drifted analog accelerator with forward passes alone spends device queries twice: on the updates, and on
+    finding a step size that works. We model how readout noise accumulates over a finite budget, use that model to choose the step from
+    other devices' measurements, and count every query against searching each device or reusing a fixed setting.</p>
+
+  <ul class="findings">
+    <li>
+      <span class="k">Descent ≠ survival</span>
+      <span class="num">27.2<small>×</small></span>
+      <p>Measured single-step descent boundaries exceed whole-run failure boundaries by this geometric mean over 27 testbed comparisons.</p>
+    </li>
+    <li>
+      <span class="k">Noise-displacement model</span>
+      <span class="num">2.20<small>×</small></span>
+      <p>Geometric-mean overprediction of failure boundaries over 21 settings; the measured direction-count and noise exponents are +0.969 and −1.059.</p>
+    </li>
+    <li>
+      <span class="k">Controlled study, 36 targets</span>
+      <span class="num">−93.6<small>% forwards</small></span>
+      <p>Fine/cohort donor selection reaches 95.07% against 95.47% for target search, a 0.399 pp deficit, using 1.22M instead of 19.08M operational forwards.</p>
+    </li>
+  </ul>
+  <p class="findings-note">The saving comes from avoiding target search, not from the donor measurements themselves.
+    A transferred cohort-specific fixed setting reaches 95.39% at lower incremental cost (<a href="#fleet">results</a>).</p>
+</section>
+
+<section class="sec" id="overview" aria-labelledby="h-overview">
+  <div class="sec-head">
+    <h2 id="h-overview">At a glance</h2>
+  </div>
+  <figure class="fig" id="fig-overview">
+    <div class="diagram-scroll ov-scroll">
+      <svg class="ov" viewBox="0 0 820 724" role="img" aria-label="Method overview. Offline, networks are trained and devices degraded in simulation. A step size is then chosen by one of three routes: the donor rule, which measures noise and radius on donor devices and pools them into a coefficient kappa; fixed transfer of an earlier setting; or target search over 21 rates. The chosen step starts a two-point zeroth-order recovery loop on the target, which probes, reads a noisy loss, estimates a gradient and updates, 15,000 times. The result is kept only if validation improves. Three experiments test the theory, the routes and the configuration search.">
+        <defs>
+          <marker id="ov-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--ink-2)"/></marker>
+          <g id="ov-xbar"><path d="M0,4H30M0,12H30M0,20H30M5,0V24M13,0V24M21,0V24" stroke="var(--muted)" stroke-width="1" fill="none"/></g>
+        </defs>
+
+        <!-- row 1: stage headers and panels -->
+        <text x="0" y="20" class="h">① Offline</text>
+        <text x="186" y="20" class="h">② Choose η₀ before recovery</text>
+        <g transform="translate(398,7)"><rect width="26" height="17" rx="3" fill="var(--ink)"/><text x="13" y="12.5" text-anchor="middle" class="tag">E2</text></g>
+        <rect x="0" y="32" width="170" height="340" rx="8" class="panel" stroke-dasharray="5 4"/>
+        <rect x="186" y="32" width="634" height="340" rx="8" class="panel"/>
+
+        <!-- ① offline -->
+        <a href="#setting">
+          <rect x="10" y="46" width="150" height="52" rx="5" class="blk"/>
+          <text x="22" y="67" class="t">Train network</text>
+          <text x="22" y="86">3 factories · MNIST</text>
+          <rect x="10" y="116" width="150" height="76" rx="5" class="blk"/>
+          <text x="22" y="137" class="t">Simulated damage</text>
+          <text x="22" y="156">programming noise</text>
+          <text x="22" y="171">1–2 day drift</text>
+          <text x="22" y="186">readout noise ξ</text>
+          <rect x="10" y="210" width="150" height="150" rx="5" class="blk"/>
+          <text x="22" y="231" class="t">Damaged devices</text>
+          <g transform="translate(50,243) scale(2.3)"><use href="#ov-xbar"/></g>
+          <circle cx="61.5" cy="252.2" r="3" class="dot"/><circle cx="79.9" cy="252.2" r="3" class="dot"/><circle cx="98.3" cy="252.2" r="3" class="dot drift"/>
+          <circle cx="61.5" cy="270.6" r="3" class="dot drift"/><circle cx="79.9" cy="270.6" r="3" class="dot"/><circle cx="98.3" cy="270.6" r="3" class="dot"/>
+          <circle cx="61.5" cy="289" r="3" class="dot"/><circle cx="79.9" cy="289" r="3" class="dot drift"/><circle cx="98.3" cy="289" r="3" class="dot"/>
+          <text x="22" y="318">write θ ∈ ℝᴰ</text>
+          <text x="22" y="334">read a noisy loss</text>
+          <text x="22" y="350">no gradients</text>
+        </a>
+        <path d="M85 98 V112" class="flow" marker-end="url(#ov-ah)"/>
+        <path d="M85 192 V206" class="flow" marker-end="url(#ov-ah)"/>
+
+        <!-- ② theory strand -->
+        <a href="#model">
+          <rect x="198" y="44" width="610" height="56" rx="5" class="blk" stroke-dasharray="4 3"/>
+          <text x="210" y="63" class="mu">THEORY · noise-only displacement bound (Prop. 1)</text>
+          <text x="210" y="86" class="t" style="font-weight:500">η_noise = 2Rεm / (σ_r √(DB))</text>
+          <text x="432" y="86">the step scale the rule uses</text>
+          <g transform="translate(770,52)"><rect width="26" height="17" rx="3" fill="var(--ink)"/><text x="13" y="12.5" text-anchor="middle" class="tag">E1</text></g>
+        </a>
+        <path d="M280 100 V116" class="inform" marker-end="url(#ov-ah)"/>
+        <text x="288" y="113" class="mu">sets the scale</text>
+
+        <!-- ② three routes -->
+        <g class="route">
+          <a href="#rule">
+            <rect x="198" y="120" width="610" height="112" rx="6" class="rt rt-donor"/>
+            <text x="210" y="139" class="t" style="fill: var(--donor-text)">Donor rule</text>
+            <text x="796" y="139" text-anchor="end" class="mu">shared · 63,482 calibration forwards</text>
+            <rect x="210" y="148" width="136" height="78" rx="5" class="blk"/>
+            <text x="222" y="166" class="t">Donors</text>
+            <g transform="translate(222,176)">
+              <rect x="12" y="0" width="30" height="22" rx="2" class="chip"/>
+              <rect x="6" y="5" width="30" height="22" rx="2" class="chip"/>
+              <rect x="0" y="10" width="30" height="22" rx="2" class="chip"/>
+              <path d="M0,18H30M0,25H30M8,10V32M15,10V32M22,10V32" stroke="var(--muted)" stroke-width="0.8"/>
+            </g>
+            <text x="276" y="194">×36</text>
+            <text x="276" y="210" class="mu">or 2</text>
+            <rect x="360" y="148" width="136" height="78" rx="5" class="blk"/>
+            <text x="372" y="166" class="t">Measure</text>
+            <text x="372" y="186">σ_d: 128 draws</text>
+            <text x="372" y="202">R_d: 24 rays</text>
+            <text x="372" y="218" class="mu">clean oracle</text>
+            <rect x="510" y="148" width="136" height="78" rx="5" class="blk"/>
+            <text x="522" y="166" class="t">Pool</text>
+            <text x="522" y="186">ℓ_d = 2R_d /</text>
+            <text x="522" y="201">(σ_d √(DB))</text>
+            <text x="522" y="218" style="fill: var(--donor-text)">κ = median ℓ_d</text>
+            <rect x="660" y="148" width="136" height="78" rx="5" class="blk"/>
+            <text x="672" y="166" class="t">Select</text>
+            <rect x="672" y="174" width="69" height="16" fill="var(--donor)" opacity="0.14"/>
+            <path d="M672 176V188M683 176V188M694 176V188M705 176V188M716 176V188M727 176V188M749 176V188M760 176V188M771 176V188M782 176V188" stroke="var(--ink-2)" stroke-width="1.2"/>
+            <path d="M738 172V192" stroke="var(--donor)" stroke-width="2.6"/>
+            <text x="672" y="206">largest rung</text>
+            <text x="672" y="220">≤ √δ·ε·κ/q</text>
+          </a>
+          <path d="M346 187 H356" class="flow" marker-end="url(#ov-ah)"/>
+          <path d="M496 187 H506" class="flow" marker-end="url(#ov-ah)"/>
+          <path d="M646 187 H656" class="flow" marker-end="url(#ov-ah)"/>
+          <path d="M808 176 H814" stroke="var(--donor)" stroke-width="2" fill="none"/>
+        </g>
+
+        <g class="route">
+          <a href="#fleet">
+            <rect x="198" y="244" width="610" height="52" rx="6" class="rt rt-fixed"/>
+            <text x="210" y="263" class="t" style="fill: var(--fixed-text)">Fixed transfer</text>
+            <text x="796" y="263" text-anchor="end" class="mu">no new selection queries</text>
+            <text x="210" y="285">reuse an η₀ chosen earlier on a separate device population</text>
+          </a>
+          <path d="M808 270 H814" stroke="var(--fixed)" stroke-width="2" fill="none"/>
+        </g>
+
+        <g class="route">
+          <a href="#fleet">
+            <rect x="198" y="308" width="610" height="56" rx="6" class="rt rt-search"/>
+            <text x="210" y="327" class="t" style="fill: var(--search-text)">Target search</text>
+            <text x="796" y="327" text-anchor="end" class="mu">21 full runs per target</text>
+            <path d="M210 340V354M219 340V354M228 340V354M237 340V354M246 340V354M255 340V354M264 340V354M273 340V354M282 340V354M291 340V354M309 340V354M318 340V354M327 340V354M336 340V354M345 340V354M354 340V354" stroke="var(--ink-2)" stroke-width="1.2"/>
+            <path d="M300 336V358" stroke="var(--search)" stroke-width="2.6"/>
+            <path d="M360 344L366 350M366 344L360 350M369 344L375 350M375 344L369 350M378 344L384 350M384 344L378 350M387 344L393 350M393 344L387 350" stroke="var(--crit)" stroke-width="1.4"/>
+            <text x="406" y="351">run every rate; keep the best clean dev. score</text>
+          </a>
+          <path d="M808 336 H814" stroke="var(--search)" stroke-width="2" fill="none"/>
+        </g>
+
+        <!-- row 2 panel sits under the connectors that enter it -->
+        <rect x="0" y="420" width="820" height="168" rx="8" class="panel"/>
+        <!-- connections into recovery -->
+        <path d="M160 250 H178 V187 H206" class="flow" marker-end="url(#ov-ah)"/>
+        <path d="M814 176 V384 H100 V476" class="flow" marker-end="url(#ov-ah)"/>
+        <text x="560" y="400" text-anchor="middle" class="mu">chosen initial step η₀</text>
+        <path d="M45 360 V476" class="flow" marker-end="url(#ov-ah)"/>
+        <text x="50" y="470" class="t" style="font-weight:500">θ₀</text>
+        <text x="104" y="470" class="t" style="font-weight:500">η₀</text>
+
+        <!-- row 2: ③ recovery -->
+        <text x="150" y="412" class="h">③ Recover on the target</text>
+        <g transform="translate(336,399)"><rect width="26" height="17" rx="3" fill="var(--ink)"/><text x="13" y="12.5" text-anchor="middle" class="tag">E3</text></g>
+        <a href="#setting">
+          <rect x="10" y="480" width="110" height="52" rx="26" class="blk"/>
+          <text x="65" y="501" text-anchor="middle" class="mu">start</text>
+          <text x="65" y="519" text-anchor="middle" class="t" style="font-weight:500">θ₀, η₀</text>
+          <rect x="150" y="440" width="120" height="56" rx="5" class="blk"/>
+          <text x="162" y="461" class="t">Probe</text>
+          <text x="162" y="482">write θ ± εu</text>
+          <rect x="340" y="440" width="120" height="56" rx="5" class="blk"/>
+          <text x="352" y="461" class="t">Device</text>
+          <g transform="translate(422,449)"><use href="#ov-xbar"/></g>
+          <text x="352" y="482">y± = f + ξ</text>
+          <rect x="340" y="516" width="120" height="56" rx="5" class="blk"/>
+          <text x="352" y="537" class="t">Estimate</text>
+          <text x="352" y="558">ĝ = Δy·u / 2ε</text>
+          <rect x="150" y="516" width="120" height="56" rx="5" class="blk"/>
+          <text x="162" y="537" class="t">Update</text>
+          <text x="162" y="558">θ ← θ − η_t ĝ</text>
+          <text x="305" y="511" text-anchor="middle" class="t">×15,000</text>
+        </a>
+        <path d="M120 506 H134 V468 H146" class="flow" marker-end="url(#ov-ah)"/>
+        <path d="M270 468 H336" class="flow" marker-end="url(#ov-ah)"/>
+        <text x="303" y="461" text-anchor="middle" class="mu">2 queries</text>
+        <path d="M400 496 V512" class="flow" marker-end="url(#ov-ah)"/>
+        <path d="M340 544 H274" class="flow" marker-end="url(#ov-ah)"/>
+        <path d="M210 516 V500" class="flow" marker-end="url(#ov-ah)"/>
+        <path d="M460 506 H516" class="flow" marker-end="url(#ov-ah)"/>
+        <text x="488" y="499" text-anchor="middle" class="mu">after T</text>
+        <a href="#fleet">
+          <rect x="520" y="440" width="140" height="132" rx="5" class="blk"/>
+          <text x="532" y="461" class="t">Keep or revert</text>
+          <text x="532" y="482">keep only if</text>
+          <text x="532" y="498">5-draw validation</text>
+          <text x="532" y="514">improves</text>
+          <text x="532" y="542" class="mu">31 checkpoints</text>
+          <text x="532" y="557" class="mu">watch for escapes</text>
+          <rect x="676" y="440" width="134" height="132" rx="5" class="blk"/>
+          <text x="688" y="461" class="t">Recovered</text>
+          <text x="688" y="482">clean-readout</text>
+          <text x="688" y="498">test accuracy</text>
+          <text x="688" y="542" class="mu">every query</text>
+          <text x="688" y="557" class="mu">in the ledger</text>
+        </a>
+        <path d="M660 506 H672" class="flow" marker-end="url(#ov-ah)"/>
+
+        <!-- row 3: ④ tested by -->
+        <text x="0" y="616" class="h">④ Tested by</text>
+        <g transform="translate(430,604)">
+          <path d="M0 8 H28" class="flow" marker-end="url(#ov-ah)"/><text x="36" y="12" class="mu">state and data</text>
+          <path d="M138 8 H166" class="inform" marker-end="url(#ov-ah)"/><text x="174" y="12" class="mu">informs</text>
+          <rect x="238" y="0" width="22" height="15" rx="3" fill="var(--ink)"/><text x="249" y="11.5" text-anchor="middle" class="tag" style="font-size:9px">E</text><text x="268" y="12" class="mu">where tested</text>
+        </g>
+        <a href="#law">
+          <rect x="0" y="628" width="262" height="86" rx="6" class="blk"/>
+          <g transform="translate(12,640)"><rect width="26" height="17" rx="3" fill="var(--ink)"/><text x="13" y="12.5" text-anchor="middle" class="tag">E1</text></g>
+          <text x="48" y="653" class="t">Predicting failure</text>
+          <text x="12" y="680">descent boundary 27.2× above failure</text>
+          <text x="12" y="698">noise model off by 2.20× (geo. mean)</text>
+        </a>
+        <a href="#fleet">
+          <rect x="279" y="628" width="262" height="86" rx="6" class="blk"/>
+          <g transform="translate(291,640)"><rect width="26" height="17" rx="3" fill="var(--ink)"/><text x="13" y="12.5" text-anchor="middle" class="tag">E2</text></g>
+          <text x="327" y="653" class="t">Accuracy vs. cost</text>
+          <text x="291" y="680">36 targets, every forward counted</text>
+          <text x="291" y="698">−0.40 pp vs search, −93.6% forwards</text>
+        </a>
+        <g>
+          <rect x="558" y="628" width="262" height="86" rx="6" class="blk" stroke-dasharray="4 3"/>
+          <g transform="translate(570,640)"><rect width="26" height="17" rx="3" fill="var(--ink)"/><text x="13" y="12.5" text-anchor="middle" class="tag">E3</text></g>
+          <text x="606" y="653" class="t">Configuration screens</text>
+          <text x="570" y="680">joint ε–η search reorders</text>
+          <text x="570" y="698">ZO, POEM, PolyStep <tspan class="mu">(paper only)</tspan></text>
+        </g>
+      </svg>
+    </div>
+    <p class="scroll-hint">Scroll sideways to see the whole diagram.</p>
+    <figcaption><b>One recovery loop, three ways to pick its step.</b> ① Networks are trained and devices degraded in simulation; hollow dots
+      mark drifted cells. ② The initial step η₀ comes from donor measurements (blue), a fixed setting transferred from earlier devices (green),
+      or a 21-rate search on each target (orange). ③ Two-point zeroth-order recovery reads only a noisy scalar loss, runs T = B/2m updates, and
+      keeps its result only if validation improves. The controlled study charges every forward pass of all three routes to one ledger.
+      Hover a route to isolate it; click a block to jump to its section.</figcaption>
+  </figure>
+</section>
+
+
+<section class="sec" id="rule" aria-labelledby="h-rule">
+  <div class="sec-head">
+    <h2 id="h-rule">Choosing the step from other devices</h2>
+  </div>
+  <div class="prose">
+    <aside class="note"><b>Scope</b>The bound covers an idealized noise-only process, not device failure. Radius calibration uses clean
+      simulator readout, which physical devices may not provide.</aside>
+    <p>Recovery can write the device's parameters and read a noisy scalar loss, but it cannot compute gradients, so it uses two-point
+      zeroth-order updates with probe <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-eps"><mi>ε</mi></mstyle></mrow><annotation encoding="application/x-tex">\Seps</annotation></semantics></math></span> and step <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-eta"><mi>η</mi></mstyle></mrow><annotation encoding="application/x-tex">\Seta</annotation></semantics></math></span>. The obvious step, the largest one that still gives expected descent, fails:
+      measured single-step descent boundaries sit <span class="num-inline">27.2×</span> (geometric mean) above the largest step that survives a whole run.</p>
+    <p>Readout noise persists even when the useful update becomes small, so it accumulates over the run. Bounding how far a noise-only
+      process drifts in <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi><mo>=</mo><mstyle class="sym sym-B"><mi>B</mi></mstyle><mi mathvariant="normal">/</mi><mn>2</mn><mstyle class="sym sym-m"><mi>m</mi></mstyle></mrow><annotation encoding="application/x-tex">T=\SB/2\Sm</annotation></semantics></math></span> updates (Proposition 1) gives a step scale:</p>
+    <div class="eq-box">
+      <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mi>η</mi><mrow><mi mathvariant="normal">n</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">e</mi></mrow></msub><mo stretchy="false">(</mo><mstyle class="sym sym-m"><mi>m</mi></mstyle><mo separator="true">,</mo><mstyle class="sym sym-B"><mi>B</mi></mstyle><mo stretchy="false">)</mo><mo>=</mo><mfrac><mrow><mn>2</mn><mtext> </mtext><mstyle class="sym sym-R"><mi>R</mi></mstyle><mtext> </mtext><mstyle class="sym sym-eps"><mi>ε</mi></mstyle><mtext> </mtext><mstyle class="sym sym-m"><mi>m</mi></mstyle></mrow><mrow><mstyle class="sym sym-sig"><msub><mi>σ</mi><mi mathvariant="normal">r</mi></msub></mstyle><msqrt><mrow><mstyle class="sym sym-D"><mi>D</mi></mstyle><mtext> </mtext><mstyle class="sym sym-B"><mi>B</mi></mstyle></mrow></msqrt></mrow></mfrac></mrow><annotation encoding="application/x-tex">\eta_{\mathrm{noise}}(\Sm,\SB)=\frac{2\,\SR\,\Seps\,\Sm}{\Ssig\sqrt{\SD\,\SB}}</annotation></semantics></math></span>
+    </div>
+    <p>Other devices of the same substrate, called <em>donors</em>, supply the readout noise <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-sig"><msub><mi>σ</mi><mi mathvariant="normal">r</mi></msub></mstyle></mrow><annotation encoding="application/x-tex">\Ssig</annotation></semantics></math></span> and the radius <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-R"><mi>R</mi></mstyle></mrow><annotation encoding="application/x-tex">\SR</annotation></semantics></math></span>. Their pooled
+      coefficient <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>κ</mi></mrow><annotation encoding="application/x-tex">\kappa</annotation></semantics></math></span> sets a ceiling <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mtext> </mtext><msub><mi>η</mi><mn>0</mn></msub><mo>≤</mo><msqrt><mi>δ</mi></msqrt><mtext> </mtext><mstyle class="sym sym-eps"><mi>ε</mi></mstyle><mstyle class="sym sym-m"><mi>m</mi></mstyle><mi>κ</mi></mrow><annotation encoding="application/x-tex">q\,\eta_0\le\sqrt\delta\,\Seps\Sm\kappa</annotation></semantics></math></span>, where <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi></mrow><annotation encoding="application/x-tex">q</annotation></semantics></math></span> accounts for the step schedule, and the rule takes the largest rate on a ladder
+      below it, or abstains. The target itself is never searched. Try it on the stored measurements:</p>
+  </div>
+  <figure class="fig" id="fig-rule">
+    <div class="fig-head">
+      <p class="fig-title">Run the rule on a real target</p>
+    </div>
+    <div class="controls rule-controls">
+      <div class="ctl ctl-target">
+        <label for="rule-target">Target device</label>
+        <select id="rule-target"></select>
+      </div>
+      <div class="ctl">
+        <span class="lbl" id="rule-pool-l">Donor pool</span>
+        <div class="seg" role="group" aria-labelledby="rule-pool-l" id="rule-pool">
+          <button type="button" data-v="cohort" aria-pressed="true">Cohort · 2</button><button type="button" data-v="substrate" aria-pressed="false">Substrate · 36</button>
+        </div>
+      </div>
+      <div class="ctl">
+        <span class="lbl" id="rule-grid-l">Rate ladder</span>
+        <div class="seg" role="group" aria-labelledby="rule-grid-l" id="rule-grid">
+          <button type="button" data-v="fine" aria-pressed="true">Fine · 21</button><button type="button" data-v="coarse" aria-pressed="false">Coarse · 3</button>
+        </div>
+      </div>
+      <div class="ctl">
+        <label for="rule-delta">Margin δ <span class="readout" id="rule-delta-out"></span></label>
+        <input id="rule-delta" type="range" min="0.01" max="0.5" step="0.01" value="0.1">
+      </div>
+    </div>
+    <div class="demo-grid">
+      <div>
+        <p class="demo-sub">Donor levels → ceiling → rung, then the target's measured outcome at each rung</p>
+        <div class="plot" id="rule-main"></div>
+      </div>
+      <div>
+        <p class="demo-sub">Validation accuracy during recovery (5-draw noisy mean)</p>
+        <div class="plot" id="rule-traj"></div>
+        <dl class="kv" id="rule-kv"></dl>
+      </div>
+    </div>
+    <p class="status" id="rule-status" aria-live="polite"></p>
+    <figcaption><b>All values come from stored runs.</b> The target panel shows each of its 21 target-search runs; crosses mark
+      escapes, which revert to the damaged state. Hover a rung to see its training run. At δ = 0.1 the rule reproduces every recorded selection;
+      other δ values are exploratory.</figcaption>
+  </figure>
+</section>
+
+<section class="sec" id="law" aria-labelledby="h-law">
+  <div class="sec-head">
+    <h2 id="h-law">Does the model predict when a run fails?</h2>
+  </div>
+  <div class="prose">
+    <p>In a controlled testbed we measured the largest step that survives a full run for 21 settings of noise level and direction count, then
+      compared it with each model's prediction. Coefficients are measured, never fitted to failure. The noise model overpredicts by
+      <span class="num-inline">2.20×</span> in geometric mean, while the two predictions from single-step descent give ratios of
+      <span class="num-inline">0.00377×</span> and <span class="num-inline">11.7×</span> (right panel). The measured exponents
+      (<span class="num-inline">+0.969</span> for <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-m"><mi>m</mi></mstyle></mrow><annotation encoding="application/x-tex">\Sm</annotation></semantics></math></span>, <span class="num-inline">−1.059</span> for <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-sig"><msub><mi>σ</mi><mi mathvariant="normal">r</mi></msub></mstyle></mrow><annotation encoding="application/x-tex">\Ssig</annotation></semantics></math></span>) match the model's form, but its
+      predicted budget dependence <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msup><mstyle class="sym sym-B"><mi>B</mi></mstyle><mrow><mo>−</mo><mn>1</mn><mi mathvariant="normal">/</mi><mn>2</mn></mrow></msup></mrow><annotation encoding="application/x-tex">\SB^{-1/2}</annotation></semantics></math></span> is not confirmed.</p>
+  </div>
+  <figure class="fig" id="fig-law">
+    <div class="fig-head">
+      <p class="fig-title">Predicted against measured whole-run failure boundary, 21 testbed settings</p>
+      <div class="seg" role="group" aria-label="Prediction model" id="law-view">
+        <button type="button" data-v="noise" aria-pressed="true">Noise model</button><button type="button" data-v="noise_cap" aria-pressed="false">Noise + local cap</button><button type="button" data-v="descent_trace" aria-pressed="false">Descent (trace)</button><button type="button" data-v="descent_LD" aria-pressed="false">Descent (LD)</button>
+      </div>
+    </div>
+    <div class="plot"></div>
+    <figcaption><b>Left:</b> each point is one (σ, <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-m"><mi>m</mi></mstyle></mrow><annotation encoding="application/x-tex">\Sm</annotation></semantics></math></span>) setting. Shape and shade mark σ, and labels give <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mstyle class="sym sym-m"><mi>m</mi></mstyle></mrow><annotation encoding="application/x-tex">\Sm</annotation></semantics></math></span> at σ = 0.2. The diagonal marks
+      agreement; the grey band is the √10 grid resolution, not statistical uncertainty. The dashed line is <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>2</mn><mi mathvariant="normal">/</mi><msub><mi>L</mi><mrow><mi mathvariant="normal">l</mi><mi mathvariant="normal">o</mi><mi mathvariant="normal">c</mi></mrow></msub></mrow><annotation encoding="application/x-tex">2/L_{\mathrm{loc}}</annotation></semantics></math></span>. <b>Right:</b> the ratio of
+      prediction to measurement for all four models, with geometric means. Click a row to plot that model.</figcaption>
+  </figure>
+</section>
+<section class="sec" id="fleet" aria-labelledby="h-fleet">
+  <div class="sec-head">
+    <h2 id="h-fleet">Accuracy and the queries it costs</h2>
+  </div>
+  <div class="prose">
+    <p>On 36 held-out crossbar targets with disjoint donors, every policy is frozen before recovery. Every forward pass is counted: calibration,
+      search, recovery, monitoring and validation.</p>
+  </div>
+  <figure class="fig" id="fig-fleet">
+    <div class="fig-head">
+      <p class="fig-title">Clean test accuracy and operational forwards, fleet of 36</p>
+      <div class="seg" role="group" aria-label="Policies shown" id="fleet-view">
+        <button type="button" data-v="primary" aria-pressed="true">Six in the paper figure</button><button type="button" data-v="all" aria-pressed="false">All declared policies</button>
+      </div>
+    </div>
+    <div class="plot"></div>
+    <figcaption><b>Means over 36 targets, balanced across factories and cohorts.</b> Blue circles are donor-calibrated rules, green squares are fixed
+      settings, and the orange diamond is per-target search over 21 rates. Donor-screened fixed policies include their acquisition on the donors. Transferred
+      fixed policies reuse settings from a separate calibration population, and their earlier acquisition is not counted here. The dashed line marks the
+      prespecified 0.10 pp tolerance below target search. It is not a confidence interval.</figcaption>
+  </figure>
+  <div class="prose">
+    <aside class="note"><b>How to read it</b>A descriptive accuracy–cost trade-off, not evidence of non-inferiority: the 0.399 pp deficit exceeds
+      the prespecified 0.10 pp tolerance.</aside>
+    <p>Fine/cohort selection reaches <span class="num-inline">95.07%</span> against <span class="num-inline">95.47%</span> for target search,
+      with <span class="num-inline">93.62%</span> fewer operational forwards. Whether the donor measurements themselves help depends on the
+      comparison: fine/cohort beats the fixed default by <span class="num-inline">0.554 pp</span>, but a transferred cohort-specific fixed
+      setting reaches <span class="num-inline">95.39%</span> at lower cost, and the coarse rule picks exactly the fixed default on all 36 targets.</p>
+  </div>
+</section>
+
+
+
+
+<section class="sec" id="scope" aria-labelledby="h-scope">
+  <div class="sec-head">
+    <h2 id="h-scope">Limitations</h2>
+  </div>
+  <ul class="scope">
+    <li><b>Simulation only</b>All hardware results are simulations on small classification tasks. Physical devices and larger models are untested.</li>
+    <li><b>Clean calibration</b>Radius calibration and development scoring use clean simulator readout.</li>
+    <li><b>An idealized bound</b>It covers noise-only displacement, not device reliability, and the budget exponent is unresolved.</li>
+    <li><b>A small study</b>Three base models; query counts are not hardware energy savings.</li>
+  </ul>
+</section>
+
+
+<section class="sec" id="cite" aria-labelledby="h-cite">
+  <div class="sec-head">
+    <h2 id="h-cite">BibTeX</h2>
+  </div>
+  <div class="bib">
+    <div class="bib-bar"><button type="button" class="btn-ghost" id="bib-copy">Copy BibTeX</button></div>
+    <pre id="bibtex">@inproceedings{anonymous2027budgetaware,
+  title     = {Budget-Aware Step Selection for Forward-Only Recovery of Analog Accelerators},
+  author    = {Anonymous},
+  booktitle = {Submitted to The Fifteenth International Conference on Learning Representations},
+  year      = {2027},
+  note      = {Under review}
+}</pre>
+  </div>
+</section>
+
+</div>
+</main>
+
+<script src="static/data/site_data.js?v=4d889711"></script>
+<script src="static/js/site.js?v=53a12e9d"></script>
+</body>
+</html>
